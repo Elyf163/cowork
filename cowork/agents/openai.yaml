@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cowork"
+  short_description: "Codex 审核、Reasonix 一次授权后自动迭代的协作循环"
+  default_prompt: "Use $cowork to run a single-approval Codex–Reasonix implementation loop for this project."
