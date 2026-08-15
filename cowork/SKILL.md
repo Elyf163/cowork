@@ -26,9 +26,10 @@ Resolve each selected command before approval. Use its own configured model,
 reasoning strength, credentials, and skills: never add `--model`, `--effort`,
 `--variant`, or a model/profile override unless the user explicitly asks.
 `codex-chat` means a separate Codex conversation and is a manual handoff, not
-the current Planner silently editing source. `deepseek-harness` needs a
-configured coding-capable command; the harness CLI alone is not assumed to be
-an editor.
+the current Planner silently editing source. `deepseek-harness` uses the
+installed `dsh --profile headless` CLI when available; `dsh web` is an
+interactive UI and is not the executor. If `dsh` is not discoverable, provide
+an explicit argv command in `.cowork/executors.json`.
 
 Record the immutable selection, exact project root, mode, and five-round budget
 in `.cowork/plan.md`. Then ask for one start approval: `开始` (network) or
@@ -46,8 +47,8 @@ Optional `.cowork/executors.json` uses argv arrays, never shell strings:
 Placeholders are `{root}`, `{prompt}`, and `{max_steps}`. `input` is `argv` or
 `stdin`; `native:true` declares that the agent itself enforces the project
 boundary on non-Linux hosts. Unknown agents, malformed commands, shell strings,
-and missing executables fail closed. Built-ins are OpenCode, Reasonix,
-Claude Code, plus manual `codex-chat` and configurable `deepseek-harness`.
+and missing executables fail closed. Built-ins are OpenCode, Reasonix, Claude
+Code, `dsh` headless (`deepseek-harness`), plus manual `codex-chat`.
 
 ## Task protocol
 

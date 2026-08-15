@@ -49,6 +49,27 @@ class MultiAgentProtocolTest(unittest.TestCase):
         self.assertEqual(input_text, envelope)
         self.assertNotIn("--model", command)
 
+    def test_deepseek_harness_uses_headless_dsh_without_model_override(self):
+        spec = runner.load_agents(Path("/repo"))["deepseek-harness"]
+
+        self.assertFalse(spec.get("manual"))
+        self.assertEqual(spec["command"], ["dsh", "--profile", "headless", "{prompt}"])
+        envelope = runner.task_envelope(Path("/repo"), 1, {
+            "id": "t1", "agent": "deepseek-harness", "allowed_paths": ["src"],
+        }, "sha256:abc")
+        command, input_text = runner.render_agent_command(spec, Path("/repo"), envelope)
+        self.assertEqual(command[-1], envelope)
+        self.assertIsNone(input_text)
+        self.assertNotIn("--model", command)
+
+    def test_dsh_can_be_found_from_nvm_bin_when_not_on_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dsh = Path(directory) / "dsh"
+            dsh.write_text("", encoding="utf-8")
+            with patch.dict(runner.os.environ, {"NVM_BIN": directory}):
+                with patch.object(runner.shutil, "which", return_value=None):
+                    self.assertEqual(runner.find_executable("dsh"), str(dsh))
+
     def test_invalid_path_and_unknown_agent_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)

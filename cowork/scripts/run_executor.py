@@ -46,8 +46,8 @@ DEFAULT_AGENTS: dict[str, dict[str, Any]] = {
         "input": "argv", "native": False, "model_flag": "--model",
     },
     "deepseek-harness": {
-        "manual": True,
-        "hint": "configure a coding-capable command in .cowork/executors.json",
+        "command": ["dsh", "--profile", "headless", "{prompt}"],
+        "input": "argv", "native": False, "runtime": "dsh",
     },
     "codex-chat": {
         "manual": True,
@@ -56,11 +56,38 @@ DEFAULT_AGENTS: dict[str, dict[str, Any]] = {
 }
 
 
-def executable(name: str, override: str | None = None) -> str:
+def executable_candidates(name: str) -> list[Path]:
+    """Find user-installed CLIs even when a package manager bin dir is not on PATH."""
+    candidates: list[Path] = []
+    env_name = name.upper().replace("-", "_") + "_BIN"
+    if os.environ.get(env_name):
+        candidates.append(Path(os.environ[env_name]).expanduser())
+    if name == "reasonix":
+        candidates.append(Path.home() / ".local/bin/reasonix")
+    if name == "dsh":
+        candidates.append(Path.home() / ".local/bin/dsh")
+        nvm_bin = os.environ.get("NVM_BIN")
+        if nvm_bin:
+            candidates.append(Path(nvm_bin) / "dsh")
+        nvm_root = Path.home() / ".nvm/versions/node"
+        if nvm_root.is_dir():
+            candidates.extend(path / "bin/dsh" for path in sorted(nvm_root.iterdir(), reverse=True))
+        for base_name in ("APPDATA", "LOCALAPPDATA"):
+            base = os.environ.get(base_name)
+            if base:
+                candidates.append(Path(base) / "npm" / "dsh.cmd")
+    return candidates
+
+
+def find_executable(name: str, override: str | None = None) -> str | None:
     candidate = override or shutil.which(name)
-    if not candidate and name == "reasonix":
-        fallback = Path.home() / ".local/bin/reasonix"
-        candidate = str(fallback) if fallback.is_file() else None
+    if not candidate:
+        candidate = next((str(path) for path in executable_candidates(name) if path.is_file()), None)
+    return candidate
+
+
+def executable(name: str, override: str | None = None) -> str:
+    candidate = find_executable(name, override)
     if not candidate:
         raise SystemExit(f"missing executable: {name}")
     return str(Path(candidate).resolve())
@@ -205,9 +232,7 @@ def render_agent_command(spec: dict[str, Any], project: Path, envelope: str,
 
 def resolve_argv(command: list[str], override: str | None = None) -> list[str]:
     first = command[0]
-    found = override or shutil.which(first)
-    if not found and first == "reasonix":
-        found = str(Path.home() / ".local/bin/reasonix")
+    found = find_executable(first, override)
     if not found:
         raise SystemExit(f"missing executable: {first}")
     command = [str(Path(found).resolve()), *command[1:]]
@@ -245,13 +270,19 @@ def linux_sandbox(command: list[str], project: Path, args: argparse.Namespace,
         elif runtime_name == "reasonix":
             source = Path(os.environ.get("REASONIX_HOME", Path.home() / ".reasonix")).resolve()
             target = source
+        elif runtime_name == "dsh":
+            source = Path(os.environ.get("DSH_HOME", Path.home() / ".dsh")).expanduser().resolve()
+            target = source
         else:
             source = Path(str(runtime_name)).expanduser().resolve()
             target = source
-        if source.is_dir():
+        if source.is_dir() or runtime_name == "dsh":
             runtime = Path(tempfile.mkdtemp(prefix="cowork-runtime-"))
-            shutil.copytree(source, runtime, dirs_exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, runtime, dirs_exist_ok=True)
             RUNTIME_DIRS.append(runtime)
+            if not source.is_dir():
+                wrapped += ["--dir", str(target)]
             wrapped += ["--bind", str(runtime), str(target)]
     return wrapped + ["--chdir", str(project), "--setenv", "GIT_OPTIONAL_LOCKS", "0", *command]
 
@@ -302,6 +333,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unsafe-fallback", action="store_true")
     parser.add_argument("--opencode-bin")
     parser.add_argument("--reasonix-bin")
+    parser.add_argument("--dsh-bin")
     parser.add_argument("--bwrap-bin")
     args = parser.parse_args()
     if args.round < 1 or args.round > 5 or args.max_steps < 1:
@@ -334,7 +366,9 @@ def main() -> int:
             print(f"manual executor: read {handoff} in the selected agent conversation")
             return 3
         command, input_text = render_agent_command(agent, project, envelope, args.model, args.max_steps)
-        override = args.opencode_bin if task["agent"] == "opencode" else args.reasonix_bin if task["agent"] == "reasonix" else None
+        override = (args.opencode_bin if task["agent"] == "opencode" else
+                    args.reasonix_bin if task["agent"] == "reasonix" else
+                    args.dsh_bin if task["agent"] == "deepseek-harness" else None)
         command = command_for_platform(resolve_argv(command, override), project, args, agent)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from exc
