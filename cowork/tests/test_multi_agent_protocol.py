@@ -70,6 +70,14 @@ class MultiAgentProtocolTest(unittest.TestCase):
                 with patch.object(runner.shutil, "which", return_value=None):
                     self.assertEqual(runner.find_executable("dsh"), str(dsh))
 
+    def test_dsh_alias_is_canonicalized_to_deepseek_harness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / ".cowork").mkdir()
+            task = {"id": "t1", "agent": "dsh", "allowed_paths": ["src"]}
+            runner.validate_task(project, task, runner.load_agents(project))
+            self.assertEqual(task["agent"], "deepseek-harness")
+
     def test_invalid_path_and_unknown_agent_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)

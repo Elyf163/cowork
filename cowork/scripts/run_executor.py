@@ -55,6 +55,12 @@ DEFAULT_AGENTS: dict[str, dict[str, Any]] = {
     },
 }
 
+AGENT_ALIASES = {
+    "dsh": "deepseek-harness",
+    "deepseek": "deepseek-harness",
+    "deepseek harness": "deepseek-harness",
+}
+
 
 def executable_candidates(name: str) -> list[Path]:
     """Find user-installed CLIs even when a package manager bin dir is not on PATH."""
@@ -118,6 +124,13 @@ def load_agents(project: Path) -> dict[str, dict[str, Any]]:
     return agents
 
 
+def canonical_agent_id(agent_id: Any, agents: dict[str, dict[str, Any]]) -> Any:
+    if not isinstance(agent_id, str) or agent_id in agents:
+        return agent_id
+    alias = AGENT_ALIASES.get(agent_id.strip().lower())
+    return alias if alias in agents else agent_id
+
+
 def project_root(path: str | Path) -> Path:
     project = Path(path).expanduser().resolve()
     if not project.is_dir() or project.parent == project:
@@ -132,7 +145,8 @@ def project_root(path: str | Path) -> Path:
 
 def validate_task(project: Path, task: dict[str, Any], agents: dict[str, dict[str, Any]]) -> None:
     task_id = task.get("id")
-    agent_id = task.get("agent")
+    agent_id = canonical_agent_id(task.get("agent"), agents)
+    task["agent"] = agent_id
     if not isinstance(task_id, str) or not task_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in task_id):
         raise ValueError("task id must be a short path-safe string")
     if agent_id not in agents:

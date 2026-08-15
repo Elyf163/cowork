@@ -19,17 +19,19 @@ If `.cowork/plan.md` has no `executor_policy`, stop and ask once:
 
 ```text
 执行 agent（可多选）：codex-chat | opencode (recommended) | reasonix |
-deepseek-harness | claude-code | custom:<id>
+deepseek-harness (dsh) | claude-code | custom:<id>
 ```
 
 Resolve each selected command before approval. Use its own configured model,
 reasoning strength, credentials, and skills: never add `--model`, `--effort`,
 `--variant`, or a model/profile override unless the user explicitly asks.
 `codex-chat` means a separate Codex conversation and is a manual handoff, not
-the current Planner silently editing source. `deepseek-harness` uses the
+the current Planner silently editing source. `deepseek-harness`/`dsh` uses the
 installed `dsh --profile headless` CLI when available; `dsh web` is an
-interactive UI and is not the executor. If `dsh` is not discoverable, provide
-an explicit argv command in `.cowork/executors.json`.
+interactive UI and is not the executor. Do not use `command -v dsh` as the
+only check: the runner also searches `DSH_BIN`, `NVM_BIN`, common nvm bins, and
+Windows npm shims. If all fail, provide an explicit argv command in
+`.cowork/executors.json`.
 
 Record the immutable selection, exact project root, mode, and five-round budget
 in `.cowork/plan.md`. Then ask for one start approval: `开始` (network) or
