@@ -1,143 +1,95 @@
 ---
 name: cowork
 description: >-
-  Orchestrate a single-approval coding loop in the current Codex desktop task:
-  Codex plans and reviews in chat, OpenCode (default) or Reasonix executes in
-  the built-in terminal, and project-local .cowork files record each round.
-  Use for Cowork requests or planner/executor/reviewer loops that run
-  automatically after one user-approved start mode.
+  Use when a Codex planning/review conversation must hand off project edits to
+  one or more configured coding agents (OpenCode, Reasonix, Claude Code, a
+  DeepSeek Harness adapter, or another CLI) with bounded rounds and a safe,
+  cross-platform project boundary.
 ---
 
 # Cowork
 
-Use the current Codex desktop task as the only UI. Do not start Chainlit,
-LangGraph, Codex CLI, a web server, or a detached worker.
+Codex is Planner/Reviewer. The selected agent is Executor. Codex may write
+only `.cowork/**`; the Executor may write project source only. Keep the current
+Codex task as the UI: no server, daemon, detached worker, or Codex CLI.
 
-## Roles
+## First activation
 
-- Codex: inspect read-only, plan, prepare executor instructions, refresh state,
-  review, and report in the current chat. Codex may write only `.cowork/**` and
-  must never repair target project source itself.
-- Executor: OpenCode is recommended and used by default; Reasonix remains
-  available when the user explicitly selects it. It may modify project source
-  only after one explicit approval starts the complete loop. It must never
-  modify `.cowork/**`, files outside the exact project root, or Git state.
-- User: may interrupt at any time and may add feedback while the loop is active.
-
-Default to OpenCode, five executor rounds, and network access. Preserve the
-user's existing executor configuration and model. In particular, never select,
-override, or hardcode an OpenCode model, and do not pass `--model` unless the
-user explicitly requested that model for this Cowork run. An explicitly
-selected executor, model, or offline mode applies to the complete loop. Raising
-the limit or changing those choices requires explicit user input.
-
-## Project protocol
-
-Resolve the project root once. The directory passed to the executor is the exact
-project root; never repeat an absolute user path as a nested directory.
-
-Keep the transparent record here:
+If `.cowork/plan.md` has no `executor_policy`, stop and ask once:
 
 ```text
-.cowork/
-├── plan.md
-├── round-01-request.md
-├── round-01-terminal.log
-└── round-01-review.md
+执行 agent（可多选）：codex-chat | opencode (recommended) | reasonix |
+deepseek-harness | claude-code | custom:<id>
 ```
 
-Add the same three round files for later rounds. Do not add a database, daemon,
-state machine, or second UI.
+Resolve each selected command before approval. Use its own configured model,
+reasoning strength, credentials, and skills: never add `--model`, `--effort`,
+`--variant`, or a model/profile override unless the user explicitly asks.
+`codex-chat` means a separate Codex conversation and is a manual handoff, not
+the current Planner silently editing source. `deepseek-harness` needs a
+configured coding-capable command; the harness CLI alone is not assumed to be
+an editor.
 
-## 1. Plan
+Record the immutable selection, exact project root, mode, and five-round budget
+in `.cowork/plan.md`. Then ask for one start approval: `开始` (network) or
+`开始离线`. That approval binds the agent set, root, network mode, and budget
+through completion or round 5. Do not ask again between ordinary rounds.
 
-1. Inspect the current project without changing source files.
-2. Resolve every requested Codex or executor skill before proposing execution.
-   Record its exact `SKILL.md` path. If unavailable, tell the user now; never
-   let the executor spend a round searching for or installing it.
-3. Prefer the standard library, platform features, and installed dependencies.
-   If the round will be offline, do not plan a dependency download.
-4. Write `.cowork/plan.md` with the task, exact root, constraints, concise plan,
-   acceptance checks, selected executor, any explicitly requested model,
-   selected skills, and five-round limit.
-5. Show the complete plan in the current Codex response.
-6. End the turn with one start choice: `开始` (network, the default) or
-   `开始离线`. Explain that offline works only with an executor configuration
-   that needs no network. This single approval authorizes the automatic loop
-   through completion or the round limit. Do not request approval again between
-   normal rounds.
+## Agent registry
 
-## 2. Run the approved loop
+Optional `.cowork/executors.json` uses argv arrays, never shell strings:
 
-After the single start approval, repeat the following steps until approved,
-interrupted, blocked by a permission boundary, or the round limit is reached.
-Before each new round, incorporate any user feedback that arrived in the
-current Codex task.
-
-Create the next `round-NN-request.md`. Include:
-
-- exact project root and the statement that it is already the project root;
-- original task and approved plan;
-- prior Codex findings and new user feedback;
-- exact executor skill path, if selected;
-- a small, bounded objective for this round;
-- prohibitions on writing outside the root and on `git commit`, `push`,
-  `merge`, `reset`, `clean`, `checkout`, and worktree operations;
-- required minimal checks and a concise final report.
-
-Run the selected executor in the foreground through the built-in terminal:
-
-```bash
-python3 <cowork-skill>/scripts/run_executor.py /absolute/project/root NN
+```json
+{"agents":{"my-agent":{"command":["my-agent","--root","{root}","{prompt}"],"input":"argv","native":true}}}
 ```
 
-This uses OpenCode by default. Add `--executor reasonix` only when Reasonix was
-selected. Add `--model <provider/model>` only when the user explicitly requested
-that model; otherwise omit it so OpenCode uses the user's existing configuration
-and current model.
+Placeholders are `{root}`, `{prompt}`, and `{max_steps}`. `input` is `argv` or
+`stdin`; `native:true` declares that the agent itself enforces the project
+boundary on non-Linux hosts. Unknown agents, malformed commands, shell strings,
+and missing executables fail closed. Built-ins are OpenCode, Reasonix,
+Claude Code, plus manual `codex-chat` and configurable `deepseek-harness`.
 
-Add `--offline` only when the loop was explicitly started with `开始离线`.
-`--network` remains accepted for compatibility but network is the default.
-Keep the selected executor, model policy, and mode fixed for all rounds. The
-runner streams output to the terminal, records it in `.cowork`, makes the rest
-of the host filesystem read-only, keeps `.cowork` and Git metadata read-only to
-the executor, and limits Git to read-only inspection commands inside the
-executor sandbox. The Reasonix backend defaults to 12 tool steps. Never detach
-the command. The Codex Stop control is the hard interrupt.
+## Task protocol
 
-## 3. Refresh and review
+For each round, Codex writes compact `.cowork/round-NN-tasks.jsonl` records:
 
-Immediately after the executor exits or is interrupted:
+```json
+{"id":"t1","agent":"opencode","allowed_paths":["src"],"deps":[],"objective":"...","checks":["..."]}
+```
 
-1. Reload `git status`, `git diff`, untracked files, and every changed source
-   file from disk. For a non-Git project, list and read the project files.
-2. Treat the filesystem as truth; do not review only the executor's summary.
-3. Check the approved task, scope, correctness, and smallest relevant tests.
-   Codex must not repair source code itself.
-4. Recheck status just before publishing the verdict. If files changed during
-   review, discard the verdict and review the new state.
-5. Write `round-NN-review.md` with `APPROVED` or `REQUEST_CHANGES`, findings,
-   checks observed, and the next bounded objective.
-6. Show the full review in the current Codex task. During an active loop, use a
-   concise progress update so the user can observe and interrupt before the
-   next terminal command.
+Codex assigns one bounded task to one selected agent. Dependencies are a DAG;
+overlapping paths require an explicit dependency and run sequentially. No
+silent agent substitution or automatic retry. The runner sends a short JSON
+envelope containing root, round, task id, request pointer, digest, paths, and
+rules. The agent reads objective and checks from `.cowork` and
+returns one short result with `status`, `changed`, `checks`, `blockers`, and
+`next`; the runner appends a compact `round-NN-events.jsonl`, while full
+terminal output stays in the round log for human review.
 
-For `REQUEST_CHANGES`, immediately prepare and run the next bounded round
-without asking for another offline/network approval. For `APPROVED`, report the
-result and leave committing, merging, or deleting to an explicit user request.
+Run in the foreground (works with `python`/`py -3` on Windows):
 
-Pause and request new approval only when the next action would:
+```text
+python <cowork-skill>/scripts/run_executor.py <project-root> NN --task t1
+```
 
-- change an offline loop to network access;
-- change the selected executor or add/change a model override;
-- expand the writable project root or use a new external permission;
-- perform a destructive or irreversible action; or
-- exceed the configured round limit.
+Use `--executor <id>` only for an explicitly approved override. Use
+`--unsafe-fallback` only after explicit approval when the host has no verified
+sandbox. Linux uses bubblewrap when available; non-Linux execution requires an
+agent-native boundary unless that explicit fallback is approved. Offline mode
+requires a platform network sandbox.
 
-Do not turn ordinary code-review findings into approval prompts.
+## Invariants and review
 
-## Interrupted runs
+- Executor path is the canonical project root; reject root, traversal, and
+  symlink escapes. `.cowork/**` and `.git/**` are read-only to Executor.
+- Executor cannot commit, push, merge, reset, clean, checkout, or use
+  worktrees. Git inspection is read-only. Runtime caches are not project edits.
+- Codex reloads status/diff/untracked files and changed source after every
+  task, writes a human-readable `round-NN-review.md`, and never repairs source.
+- `APPROVED` ends the loop; `REQUEST_CHANGES` creates a new bounded task. An
+  interrupt is recorded, never retried automatically, and stops the loop.
+- Changing agent set, model override, root, network mode, unsafe fallback, or
+  exceeding five rounds requires new approval.
 
-After an interrupt, never auto-retry. Refresh the filesystem, report residual
-changes, write the review, and stop the loop. The user decides whether to start
-again.
+Keep records small: reference `plan` and task ids/digests instead of repeating
+history or absolute paths. Never trade the safety invariants for fewer tokens.

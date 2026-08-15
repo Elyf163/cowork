@@ -1,4 +1,4 @@
 interface:
   display_name: "Cowork"
-  short_description: "Codex 规划审核、OpenCode 或 Reasonix 执行的单次授权协作循环"
-  default_prompt: "Use $cowork to run a single-approval Codex planner/reviewer and OpenCode executor loop for this project."
+  short_description: "Codex 规划审核、可选多 agent 执行的跨平台协作循环"
+  default_prompt: "Use $cowork; first ask which execution agents to use, then run the approved multi-agent planner/reviewer loop."

@@ -18,6 +18,10 @@ class GitGuardTest(unittest.TestCase):
         for command in ("commit", "push", "merge", "reset", "clean", "checkout", "worktree"):
             self.assertNotIn(command, namespace["ALLOWED"])
 
+    def test_config_and_alias_options_are_blocked(self):
+        self.assertIsNone(subcommand(["-c", "alias.status=!touch /tmp/x", "status"]))
+        self.assertIsNone(subcommand(["--config-env", "x=y", "status"]))
+
 
 if __name__ == "__main__":
     unittest.main()

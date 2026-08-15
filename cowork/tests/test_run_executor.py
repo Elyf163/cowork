@@ -15,44 +15,54 @@ SPEC.loader.exec_module(run_executor)
 
 class CommandTest(unittest.TestCase):
     def args(self, **overrides):
-        values = {
-            "bwrap_bin": None,
-            "executor": "opencode",
-            "max_steps": 12,
-            "model": None,
-            "network": True,
-            "opencode_bin": None,
-            "reasonix_bin": None,
-        }
+        values = {"bwrap_bin": None, "network": True, "unsafe_fallback": False,
+                  "max_steps": 12}
         values.update(overrides)
         return argparse.Namespace(**values)
 
-    @patch.object(run_executor, "executable", side_effect=lambda name, _: f"/bin/{name}")
-    def test_opencode_inherits_model_unless_explicitly_overridden(self, _):
-        with tempfile.TemporaryDirectory() as directory:
-            project = Path(directory)
-            default = run_executor.executor_command(self.args(), project, "do it")
-            explicit = run_executor.executor_command(
-                self.args(model="provider/model"), project, "do it"
-            )
+    def test_opencode_inherits_model_unless_explicitly_overridden(self):
+        project = Path("/project")
+        envelope = run_executor.task_envelope(project, 1, {
+            "id": "t1", "agent": "opencode", "allowed_paths": ["src"],
+            "objective": "do it", "checks": [],
+        }, "sha256:abc")
+        default, default_input = run_executor.render_agent_command(
+            run_executor.load_agents(project)["opencode"], project, envelope
+        )
+        explicit, _ = run_executor.render_agent_command(
+            run_executor.load_agents(project)["opencode"], project, envelope,
+            "provider/model"
+        )
 
         self.assertNotIn("--model", default)
-        self.assertEqual(explicit[-3:], ["--model", "provider/model", "do it"])
-        self.assertIn("/tmp/cowork-real-git", default)
+        self.assertIsNone(default_input)
+        self.assertIn("--model", explicit)
+        self.assertIn("provider/model", explicit)
+
+    def test_reasonix_receives_the_compact_envelope_on_stdin(self):
+        project = Path("/project")
+        envelope = run_executor.task_envelope(project, 1, {
+            "id": "t1", "agent": "reasonix", "allowed_paths": ["src"],
+            "objective": "do it", "checks": [],
+        }, "sha256:abc")
+        command, input_text = run_executor.render_agent_command(
+            run_executor.load_agents(project)["reasonix"], project, envelope
+        )
+
+        self.assertIn("reasonix", command[0])
+        self.assertEqual(input_text, envelope)
+        self.assertNotIn("--model", command)
 
     @patch.object(run_executor, "executable", side_effect=lambda name, _: f"/bin/{name}")
-    def test_reasonix_backend_remains_available(self, _):
+    def test_linux_command_keeps_git_guard_mount(self, _):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
-            reasonix_home = project / "reasonix-home"
-            reasonix_home.mkdir()
-            with patch.dict("os.environ", {"REASONIX_HOME": str(reasonix_home)}):
-                command = run_executor.executor_command(
-                    self.args(executor="reasonix"), project, "do it"
-                )
-
-        self.assertIn("/bin/reasonix", command)
-        self.assertIn("--max-steps", command)
+            (project / ".cowork").mkdir()
+            command = run_executor.linux_sandbox(
+                ["/bin/true"], project, self.args(), run_executor.load_agents(project)["opencode"]
+            )
+        if command is not None:
+            self.assertIn("/tmp/cowork-real-git", command)
 
 
 if __name__ == "__main__":
